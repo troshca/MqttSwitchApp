@@ -132,43 +132,29 @@ public class ModbusService : IDisposable, IAsyncDisposable
                     {
                         int groupBase = group.ModbusOffset * groupRegisterCount;
                         var groupRegisters = ReadHoldingRegisters((ushort)groupBase, groupRegisterCount);
-                        Console.WriteLine($"Read group registers for {group.Name}: {string.Join(", ", groupRegisters)}");
+
+                        // Создаем массив для всех данных группы и розеток
+                        var allRegisters = new ushort[groupRegisterCount + group.SwitchCount * socketRegisterCount];
+
+                        // Копируем данные группы
+                        Array.Copy(groupRegisters, 0, allRegisters, 0, groupRegisterCount);
+
+                        // Копируем данные розеток
+                        for (int i = 0; i < group.SwitchCount; i++)
+                        {
+                            int socketBase = groupBase + firstNumber + (i * socketRegisterCount);
+                            var socketRegisters = ReadHoldingRegisters((ushort)socketBase, socketRegisterCount);
+                            Array.Copy(socketRegisters, 0, allRegisters, groupRegisterCount + i * socketRegisterCount, socketRegisterCount);
+                        }
 
                         if (OnReadingsUpdated != null && !_disposed)
                         {
-                            await SafeInvokeReadingsUpdated(group.Name, "group", groupRegisters);
-                        }
-
-                        for (int i = 0; i < group.SwitchCount; i++)
-                        {
-                            if (cancellationToken.IsCancellationRequested || _disposed)
-                                break;
-
-                            try
-                            {
-                                int socketBase = groupBase + firstNumber + (i * socketRegisterCount);
-                                var socketRegisters = ReadHoldingRegisters((ushort)socketBase, socketRegisterCount);
-                                Console.WriteLine($"Read socket {i + 1} registers for {group.Name}: {string.Join(", ", socketRegisters)}");
-
-                                if (OnReadingsUpdated != null && !_disposed)
-                                {
-                                    await SafeInvokeReadingsUpdated(group.Name, $"socket{i}", socketRegisters);
-                                }
-                            }
-                            catch (Exception ex)
-                            {
-                                Console.WriteLine($"Error polling socket {i + 1} for {group.Name}: {ex.Message}");
-                                // Continue with next socket instead of breaking
-                                continue;
-                            }
-
-                            await Task.Delay(50, cancellationToken);
+                            await OnReadingsUpdated.Invoke(group.Name, "all", allRegisters);
                         }
                     }
                     catch (Exception ex)
                     {
                         Console.WriteLine($"Error polling group {group.Name}: {ex.Message}");
-                        // Continue with next group instead of breaking
                         continue;
                     }
                 }
@@ -176,25 +162,10 @@ public class ModbusService : IDisposable, IAsyncDisposable
             catch (Exception ex)
             {
                 Console.WriteLine($"General error in PollReadingsAsync: {ex.Message}");
-                // Don't break here - let the loop continue
             }
 
-            try
-            {
-                await Task.Delay(30000, cancellationToken);
-            }
-            catch (OperationCanceledException)
-            {
-                Console.WriteLine("PollReadingsAsync delay canceled.");
-                break;
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error in delay for PollReadingsAsync: {ex.Message}");
-                // Continue the loop despite delay error
-            }
+            await Task.Delay(30, cancellationToken);
         }
-        Console.WriteLine("PollReadingsAsync stopped.");
     }
 
     public bool SendSwitchState(string groupName, bool[] switches)
