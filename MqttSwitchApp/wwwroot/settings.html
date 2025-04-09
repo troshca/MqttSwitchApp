@@ -1,0 +1,263 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Настройки</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/6.0.1/signalr.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+            padding: 20px;
+        }
+
+        .sidenav {
+            height: 100%;
+            width: 0;
+            position: fixed;
+            z-index: 1;
+            top: 0;
+            left: 0;
+            background-color: #111;
+            overflow-x: hidden;
+            transition: 0.5s;
+            padding-top: 60px;
+        }
+
+            .sidenav a {
+                padding: 8px 8px 8px 32px;
+                text-decoration: none;
+                font-size: 20px;
+                color: #818181;
+                display: block;
+                transition: 0.3s;
+            }
+
+                .sidenav a:hover {
+                    color: #f1f1f1;
+                }
+
+            .sidenav .closebtn {
+                position: absolute;
+                top: 0;
+                right: 25px;
+                font-size: 36px;
+                margin-left: 50px;
+            }
+
+            .sidenav a.active {
+                color: #f1f1f1;
+                font-weight: bold;
+            }
+
+        .main {
+            margin-left: 0;
+            transition: margin-left .5s;
+            padding: 20px;
+        }
+
+        .hamburger {
+            font-size: 30px;
+            cursor: pointer;
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            z-index: 2;
+        }
+
+        .settings-form {
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+            .form-group label {
+                display: block;
+                margin-bottom: 5px;
+            }
+
+            .form-group input, .form-group select {
+                width: 100%;
+                padding: 8px;
+                font-size: 16px;
+            }
+
+                .form-group input[readonly] {
+                    background-color: #e9ecef;
+                }
+
+        button {
+            padding: 10px 20px;
+            background-color: #2196F3;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+
+            button:hover {
+                background-color: #1976D2;
+            }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+
+        th {
+            background-color: #f2f2f2;
+        }
+    </style>
+</head>
+<body>
+    <div class="hamburger" onclick="toggleNav()">☰</div>
+    <div id="mySidenav" class="sidenav">
+        <a href="javascript:void(0)" class="closebtn" onclick="toggleNav()">×</a>
+        <a href="/">Управление розетками</a>
+        <!-- Пункты меню для групп добавляются динамически -->
+        <a href="#" class="active">Настройки</a>
+    </div>
+
+    <div class="main">
+        <h1>Настройки</h1>
+        <div class="settings-form">
+            <div class="form-group">
+                <label for="deviceAddress">Адрес устройства (1-247):</label>
+                <input type="number" id="deviceAddress" min="1" max="247" value="1">
+            </div>
+            <div class="form-group">
+                <label for="baudRate">Скорость порта (бит/с):</label>
+                <select id="baudRate">
+                    <option value="9600">9600</option>
+                    <option value="19200">19200</option>
+                    <option value="38400">38400</option>
+                    <option value="57600">57600</option>
+                    <option value="115200" selected>115200</option>
+                </select>
+            </div>
+            <h3>Регистры Modbus (только для чтения)</h3>
+            <table id="modbusRegisters">
+                <thead>
+                    <tr>
+                        <th>Тип</th>
+                        <th>Параметр</th>
+                        <th>Регистр</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+            <button onclick="saveSettings()">Сохранить</button>
+        </div>
+    </div>
+
+    <script>
+        const connection = new signalR.HubConnectionBuilder()
+            .withUrl("/mqttHub")
+            .build();
+
+        const groups = [
+            { name: "Группа 1", switchCount: 9, startIndex: 1, modbusOffset: 0 },
+            { name: "Группа 2", switchCount: 9, startIndex: 10, modbusOffset: 1 }
+        ];
+
+        // Генерация меню
+        const sidenav = document.getElementById("mySidenav");
+        groups.forEach((group, index) => {
+            const link = document.createElement("a");
+            link.href = `/group_readings?group=${index}`;
+            link.textContent = `Показания ${group.name}`;
+            sidenav.insertBefore(link, sidenav.lastElementChild);
+        });
+
+        function toggleNav() {
+            const sidenav = document.getElementById("mySidenav");
+            const main = document.querySelector(".main");
+            if (sidenav.style.width === "250px") {
+                sidenav.style.width = "0";
+                main.style.marginLeft = "0";
+            } else {
+                sidenav.style.width = "250px";
+                main.style.marginLeft = "250px";
+            }
+        }
+
+        // Загрузка текущих настроек
+        async function loadSettings() {
+            try {
+                const response = await fetch('/api/settings');
+                const settings = await response.json();
+                document.getElementById("deviceAddress").value = settings.deviceAddress;
+                document.getElementById("baudRate").value = settings.baudRate;
+
+                // Отображение регистров
+                const tbody = document.getElementById("modbusRegisters").querySelector("tbody");
+                tbody.innerHTML = "";
+
+                // Групповые регистры
+                Object.entries(settings.groupRegisters).forEach(([param, reg]) => {
+                    const tr = document.createElement("tr");
+                    tr.innerHTML = `
+                            <td>Группа</td>
+                            <td>${param}</td>
+                            <td><input type="number" value="${reg}" readonly></td>
+                        `;
+                    tbody.appendChild(tr);
+                });
+
+                // Регистры розеток
+                Object.entries(settings.socketRegisters).forEach(([param, reg]) => {
+                    const tr = document.createElement("tr");
+                    tr.innerHTML = `
+                            <td>Розетка</td>
+                            <td>${param}</td>
+                            <td><input type="number" value="${reg}" readonly></td>
+                        `;
+                    tbody.appendChild(tr);
+                });
+            } catch (err) {
+                console.error("Error loading settings:", err);
+            }
+        }
+
+        // Сохранение настроек
+        async function saveSettings() {
+            const settings = {
+                deviceAddress: parseInt(document.getElementById("deviceAddress").value),
+                baudRate: parseInt(document.getElementById("baudRate").value)
+            };
+
+            try {
+                const response = await fetch('/api/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(settings)
+                });
+                if (response.ok) {
+                    alert("Настройки сохранены!");
+                } else {
+                    throw new Error("Ошибка при сохранении");
+                }
+            } catch (err) {
+                console.error("Error saving settings:", err);
+                alert("Ошибка при сохранении настроек");
+            }
+        }
+
+        connection.start()
+            .then(() => {
+                console.log("SignalR connected");
+                loadSettings();
+            })
+            .catch(err => console.error("SignalR connection error:", err));
+    </script>
+</body>
+</html>

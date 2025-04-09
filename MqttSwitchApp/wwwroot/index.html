@@ -1,0 +1,240 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Управление розетками</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/6.0.1/signalr.min.js"></script>
+    <style>
+        body { margin: 0; font-family: Arial, sans-serif; padding: 20px; }
+        .sidenav {
+            height: 100%;
+            width: 0;
+            position: fixed;
+            z-index: 1;
+            top: 0;
+            left: 0;
+            background-color: #111;
+            overflow-x: hidden;
+            transition: 0.5s;
+            padding-top: 60px;
+        }
+        .sidenav a {
+            padding: 8px 8px 8px 32px;
+            text-decoration: none;
+            font-size: 20px;
+            color: #818181;
+            display: block;
+            transition: 0.3s;
+        }
+        .sidenav a:hover { color: #f1f1f1; }
+        .sidenav .closebtn {
+            position: absolute;
+            top: 0;
+            right: 25px;
+            font-size: 36px;
+            margin-left: 50px;
+        }
+        .sidenav a.active { color: #f1f1f1; font-weight: bold; }
+        .main { margin-left: 0; transition: margin-left .5s; padding: 20px; }
+        .hamburger { font-size: 30px; cursor: pointer; position: fixed; top: 10px; left: 10px; z-index: 2; }
+        .group { margin-bottom: 20px; }
+        .switch-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+        .switch { padding: 10px; border: 1px solid #ccc; text-align: center; }
+        /* Стили для переключателя */
+        .switch input[type="checkbox"] {
+            -webkit-appearance: none;
+            width: 40px;
+            height: 20px;
+            background: #ccc;
+            border-radius: 10px;
+            position: relative;
+            outline: none;
+            cursor: pointer;
+            vertical-align: middle;
+            margin-right: 5px;
+        }
+        .switch input[type="checkbox"]:checked {
+            background: #4CAF50;
+        }
+        .switch input[type="checkbox"]:before {
+            content: '';
+            position: absolute;
+            width: 16px;
+            height: 16px;
+            background: white;
+            border-radius: 50%;
+            top: 2px;
+            left: 2px;
+            transition: 0.2s;
+        }
+        .switch input[type="checkbox"]:checked:before {
+            left: 22px;
+        }
+        .switch input[disabled] { opacity: 0.5; cursor: not-allowed; }
+        .binary-display { margin-top: 20px; font-family: monospace; }
+    </style>
+</head>
+<body>
+    <div class="hamburger" onclick="toggleNav()">☰</div>
+    <div id="mySidenav" class="sidenav">
+        <a href="javascript:void(0)" class="closebtn" onclick="toggleNav()">×</a>
+        <a href="/" class="active">Управление розетками</a>
+        <a href="/group_readings?group=0">Показания Группа 1</a>
+        <a href="/group_readings?group=1">Показания Группа 2</a>
+        <a href="/settings">Настройки</a>
+    </div>
+
+    <div class="main">
+        <h1>Управление розетками</h1>
+        <div class="group">
+            <h2>Группа 1</h2>
+            <div class="switch-grid" id="group1Switches"></div>
+        </div>
+        <div class="group">
+            <h2>Группа 2</h2>
+            <div class="switch-grid" id="group2Switches"></div>
+        </div>
+        <div class="binary-display">
+            <p id="group1Binary">Группа 1 регистр MB_RELAYS_GROUP1_ADDRESS (адрес 02) - 000000000</p>
+            <p id="group2Binary">Группа 2 регистр MB_RELAYS_GROUP2_ADDRESS (адрес 04) - 000000000</p>
+        </div>
+    </div>
+
+    <script>
+        const connection = new signalR.HubConnectionBuilder()
+            .withUrl("/mqttHub")
+            .build();
+
+        const groups = [
+            { name: "Группа 1", switchCount: 9, startIndex: 1, modbusRegister: 2 },
+            { name: "Группа 2", switchCount: 9, startIndex: 10, modbusRegister: 4 }
+        ];
+
+        // Генерация переключателей
+        function generateSwitches() {
+            groups.forEach((group, index) => {
+                const container = document.getElementById(`group${index + 1}Switches`);
+                container.innerHTML = ''; // Clear existing switches
+                for (let i = 0; i < group.switchCount; i++) {
+                    const switchDiv = document.createElement("div");
+                    switchDiv.className = "switch";
+                    switchDiv.innerHTML = `
+                        <label>
+                            <input type="checkbox" id="${group.name}_switch${i}"
+                                   onchange="toggleSwitch('${group.name}', ${i})"
+                                   disabled>
+                            Розетка ${group.startIndex + i}
+                        </label>
+                    `;
+                    container.appendChild(switchDiv);
+                }
+            });
+        }
+
+        generateSwitches();
+
+        function toggleSwitch(groupName, switchIndex) {
+            const group = groups.find(g => g.name === groupName);
+            if (!group) return;
+
+            const switches = Array.from(
+                { length: group.switchCount },
+                (_, i) => document.getElementById(`${groupName}_switch${i}`).checked
+            );
+
+            connection.invoke("UpdateSwitchState", {
+                groupName: groupName,
+                switches: switches
+            }).catch(err => console.error("Error updating switch state:", err));
+        }
+
+        function updateSwitchStates(groupName, switchState, isInitialized) {
+            const group = groups.find(g => g.name === groupName);
+            if (!group) return;
+
+            // Convert state to boolean array
+            const switches = [];
+            for (let i = 0; i < group.switchCount; i++) {
+                switches.push((switchState & (1 << i)) !== 0);
+            }
+
+            console.log(`${groupName} updated: ${switches.map(s => s ? '1' : '0').join('')}`);
+
+            // Update checkboxes
+            for (let i = 0; i < group.switchCount; i++) {
+                const checkbox = document.getElementById(`${groupName}_switch${i}`);
+                if (checkbox) {
+                    checkbox.checked = switches[i];
+                    checkbox.disabled = !isInitialized;
+                }
+            }
+
+            // Update binary display
+            const binary = switches.map(s => s ? '1' : '0').join('');
+            const registerAddress = group.modbusRegister.toString().padStart(2, '0');
+            document.getElementById(`${group.name.replace(" ", "")}Binary`).textContent =
+                `${groupName} регистр MB_RELAYS_${group.name.replace(" ", "").toUpperCase()}_ADDRESS (адрес ${registerAddress}) - ${binary.padStart(group.switchCount, '0')}`;
+        }
+
+        // Handle connection events
+        connection.on("ReceiveSwitchState", (state) => {
+            try {
+                console.log("Received switch state update:", state);
+
+                // Handle both old and new state formats
+                if (state.States) {
+                    // New format from SwitchController
+                    Object.keys(state.States).forEach(groupName => {
+                        updateSwitchStates(
+                            groupName,
+                            state.States[groupName],
+                            state.Initialized?.[groupName] ?? false
+                        );
+                    });
+                } else if (state.states) {
+                    // Old format (compatibility)
+                    Object.entries(state.states).forEach(([groupName, switchState]) => {
+                        updateSwitchStates(
+                            groupName,
+                            switchState,
+                            state.initialized?.[groupName] ?? false
+                        );
+                    });
+                }
+            } catch (err) {
+                console.error("Error processing switch state:", err);
+            }
+        });
+
+        connection.onclose(() => {
+            console.log("Connection lost - reconnecting...");
+            setTimeout(() => connection.start(), 5000);
+        });
+
+        connection.start()
+            .then(() => {
+                console.log("SignalR connected");
+                // Request initial state after connection
+                connection.invoke("GetSwitchState")
+                    .catch(err => console.error("Error requesting initial state:", err));
+            })
+            .catch(err => {
+                console.error("SignalR connection error:", err);
+                setTimeout(() => connection.start(), 5000);
+            });
+
+        // Navigation toggle function remains the same
+        function toggleNav() {
+            const sidenav = document.getElementById("mySidenav");
+            const main = document.querySelector(".main");
+            if (sidenav.style.width === "250px") {
+                sidenav.style.width = "0";
+                main.style.marginLeft = "0";
+            } else {
+                sidenav.style.width = "250px";
+                main.style.marginLeft = "250px";
+            }
+        }
+    </script>
+</body>
+</html>

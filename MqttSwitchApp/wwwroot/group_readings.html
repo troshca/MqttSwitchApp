@@ -1,0 +1,251 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Показания группы</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/6.0.1/signalr.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+            padding: 20px;
+        }
+
+        .sidenav {
+            height: 100%;
+            width: 0;
+            position: fixed;
+            z-index: 1;
+            top: 0;
+            left: 0;
+            background-color: #111;
+            overflow-x: hidden;
+            transition: 0.5s;
+            padding-top: 60px;
+        }
+
+            .sidenav a {
+                padding: 8px 8px 8px 32px;
+                text-decoration: none;
+                font-size: 20px;
+                color: #818181;
+                display: block;
+                transition: 0.3s;
+            }
+
+                .sidenav a:hover {
+                    color: #f1f1f1;
+                }
+
+            .sidenav .closebtn {
+                position: absolute;
+                top: 0;
+                right: 25px;
+                font-size: 36px;
+                margin-left: 50px;
+            }
+
+            .sidenav a.active {
+                color: #f1f1f1;
+                font-weight: bold;
+            }
+
+        .main {
+            margin-left: 0;
+            transition: margin-left .5s;
+            padding: 20px;
+        }
+
+        .hamburger {
+            font-size: 30px;
+            cursor: pointer;
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            z-index: 2;
+        }
+
+        .group-header {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        .group-params {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+        }
+
+        .socket-container {
+            margin: 10px 0;
+        }
+
+        .spoiler {
+            display: none;
+            margin-left: 20px;
+        }
+
+            .spoiler.active {
+                display: block;
+            }
+
+        .spoiler-toggle {
+            cursor: pointer;
+            font-weight: bold;
+        }
+
+            .spoiler-toggle:hover {
+                text-decoration: underline;
+            }
+
+        .rms-data, .inst-data {
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="hamburger" onclick="toggleNav()">☰</div>
+    <div id="mySidenav" class="sidenav">
+        <a href="javascript:void(0)" class="closebtn" onclick="toggleNav()">×</a>
+        <a href="/" id="homeLink">Управление розетками</a>
+        <!-- Пункты меню для групп добавляются динамически -->
+    </div>
+
+    <div class="main">
+        <div class="group-header">
+            <h1 id="groupTitle">Группа</h1>
+            <div class="group-params">
+                <span>RMS Напряжение: <span id="voltageRms">0</span> В</span>
+                <span>Мгновенное Напряжение: <span id="voltageInst">0</span> В</span>
+                <span>Частота RMS: <span id="freqRms">0</span> Гц</span>
+                <span>Мгновенная Частота: <span id="freqInst">0</span> Гц</span>
+            </div>
+        </div>
+
+        <div id="socketsContainer"></div>
+    </div>
+
+    <script>
+        const connection = new signalR.HubConnectionBuilder()
+            .withUrl("/mqttHub")
+            .build();
+
+        // Получаем номер группы из URL
+        const urlParams = new URLSearchParams(window.location.search);
+        const groupIndex = parseInt(urlParams.get("group")) || 0;
+        const groups = [
+            { name: "Группа 1", switchCount: 9, startIndex: 1, modbusOffset: 0 },
+            { name: "Группа 2", switchCount: 9, startIndex: 10, modbusOffset: 1 }
+        ];
+        const group = groups[groupIndex] || groups[0];
+
+        // Устанавливаем заголовок
+        document.getElementById("groupTitle").textContent = group.name;
+
+        // Генерация меню
+        const sidenav = document.getElementById("mySidenav");
+        groups.forEach((group, index) => {
+            const link = document.createElement("a");
+            link.href = `/group_readings?group=${index}`;
+            link.textContent = `Показания ${group.name}`;
+            if (index === groupIndex) link.classList.add("active");
+            sidenav.appendChild(link);
+        });
+        const settingsLink = document.createElement("a");
+        settingsLink.href = "/settings";
+        settingsLink.textContent = "Настройки";
+        sidenav.appendChild(settingsLink);
+
+        // Генерация розеток
+        const socketsContainer = document.getElementById("socketsContainer");
+        for (let i = 0; i < group.switchCount; i++) {
+            const socketDiv = document.createElement("div");
+            socketDiv.className = "socket-container";
+            socketDiv.innerHTML = `
+                    <div class="spoiler-toggle" onclick="toggleSpoiler('socket${i}')">Розетка ${group.startIndex + i}</div>
+                    <div id="socket${i}" class="spoiler">
+                        <div class="rms-data">
+                            <h4>RMS Показания</h4>
+                            <p>Напряжение: <span id="socket${i}_voltageRms">0</span> В</p>
+                            <p>Ток: <span id="socket${i}_currentRms">0</span> А</p>
+                            <p>Активная мощность: <span id="socket${i}_activePowerRms">0</span> Вт</p>
+                            <p>Реактивная мощность: <span id="socket${i}_reactivePowerRms">0</span> вар</p>
+                            <p>Частота: <span id="socket${i}_freqRms">0</span> Гц</p>
+                        </div>
+                        <div class="inst-data">
+                            <h4>Мгновенные Показания</h4>
+                            <p>Напряжение: <span id="socket${i}_voltageInst">0</span> В</p>
+                            <p>Ток: <span id="socket${i}_currentInst">0</span> А</p>
+                            <p>Активная мощность: <span id="socket${i}_activePowerInst">0</span> Вт</p>
+                            <p>Реактивная мощность: <span id="socket${i}_reactivePowerInst">0</span> вар</p>
+                            <p>Частота: <span id="socket${i}_freqInst">0</span> Гц</p>
+                        </div>
+                    </div>
+                `;
+            socketsContainer.appendChild(socketDiv);
+        }
+
+        function toggleSpoiler(socketId) {
+            const spoiler = document.getElementById(socketId);
+            spoiler.classList.toggle("active");
+        }
+
+        function toggleNav() {
+            const sidenav = document.getElementById("mySidenav");
+            const main = document.querySelector(".main");
+            if (sidenav.style.width === "250px") {
+                sidenav.style.width = "0";
+                main.style.marginLeft = "0";
+            } else {
+                sidenav.style.width = "250px";
+                main.style.marginLeft = "250px";
+            }
+        }
+
+        function combineRegisters(low, high) {
+            return (high << 16) | low;
+        }
+
+        function updateReadings(data) {
+            const groupSize = 200; // 20 для группы + 180 для 9 розеток
+            const baseGroupOffset = groupSize * groupIndex;
+            const firstNumber = 60;
+
+            // Групповые параметры
+            document.getElementById("voltageRms").textContent = combineRegisters(data[0 + baseGroupOffset], data[1 + baseGroupOffset]);
+            document.getElementById("voltageInst").textContent = combineRegisters(data[10 + baseGroupOffset], data[11 + baseGroupOffset]);
+            document.getElementById("freqRms").textContent = combineRegisters(data[8 + baseGroupOffset], data[9 + baseGroupOffset]) / 100;
+            document.getElementById("freqInst").textContent = combineRegisters(data[18 + baseGroupOffset], data[19 + baseGroupOffset]) / 100;
+
+            // Параметры розеток
+            for (let i = 0; i < group.switchCount; i++) {
+                const baseSocketOffset = baseGroupOffset + 20 * i + firstNumber;
+                // RMS
+                document.getElementById(`socket${i}_voltageRms`).textContent = combineRegisters(data[0 + baseSocketOffset], data[1 + baseSocketOffset]);
+                document.getElementById(`socket${i}_currentRms`).textContent = combineRegisters(data[2 + baseSocketOffset], data[3 + baseSocketOffset]) / 1000;
+                document.getElementById(`socket${i}_activePowerRms`).textContent = combineRegisters(data[4 + baseSocketOffset], data[5 + baseSocketOffset]);
+                document.getElementById(`socket${i}_reactivePowerRms`).textContent = combineRegisters(data[6 + baseSocketOffset], data[7 + baseSocketOffset]);
+                document.getElementById(`socket${i}_freqRms`).textContent = combineRegisters(data[8 + baseSocketOffset], data[9 + baseSocketOffset]) / 100;
+                // Мгновенные
+                document.getElementById(`socket${i}_voltageInst`).textContent = combineRegisters(data[10 + baseSocketOffset], data[11 + baseSocketOffset]);
+                document.getElementById(`socket${i}_currentInst`).textContent = combineRegisters(data[12 + baseSocketOffset], data[13 + baseSocketOffset]) / 1000;
+                document.getElementById(`socket${i}_activePowerInst`).textContent = combineRegisters(data[14 + baseSocketOffset], data[15 + baseSocketOffset]);
+                document.getElementById(`socket${i}_reactivePowerInst`).textContent = combineRegisters(data[16 + baseSocketOffset], data[17 + baseSocketOffset]);
+                document.getElementById(`socket${i}_freqInst`).textContent = combineRegisters(data[18 + baseSocketOffset], data[19 + baseSocketOffset]) / 100;
+            }
+        }
+
+        connection.on("ReceiveModbusData", (data) => {
+            console.log("Received data:", data);
+            updateReadings(data);
+        });
+
+        connection.start()
+            .then(() => {
+                console.log("SignalR connected");
+                // Убрано connection.invoke("RequestModbusData", ...)
+            })
+            .catch(err => console.error("SignalR connection error:", err));
+    </script>
+</body>
+</html>
