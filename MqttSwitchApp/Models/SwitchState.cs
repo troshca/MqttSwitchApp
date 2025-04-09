@@ -46,6 +46,14 @@ public class SwitchState
         _initialized[groupName] = isInitialized;
     }
 
+    public object ToClientDto()
+    {
+        return new
+        {
+            States = _groups.ToDictionary(g => g.Name, g => GetState(g.Name)),
+            Initialized = _groups.ToDictionary(g => g.Name, g => IsGroupInitialized(g.Name))
+        };
+    }
     public bool[] GetSwitches(string groupName)
     {
         return _switches.TryGetValue(groupName, out var switches)

@@ -24,7 +24,13 @@ public class MqttHub : Hub
     {
         if (_modbusService.SendSwitchState(state.GroupName, state.Switches))
         {
-            await Clients.All.SendAsync("ReceiveSwitchState", _switchState);
+            var response = new
+            {
+                States = _groups.ToDictionary(g => g.Name, g => _switchState.GetState(g.Name)),
+                Initialized = _groups.ToDictionary(g => g.Name, g => _switchState.IsGroupInitialized(g.Name))
+            };
+
+            await Clients.All.SendAsync("ReceiveSwitchState", response);
         }
         else
         {
@@ -37,9 +43,33 @@ public class MqttHub : Hub
         await Clients.All.SendAsync("ReceiveMqttData", data);
     }
 
+    public async Task<object> GetSwitchState()
+    {
+        try
+        {
+            var states = _groups.ToDictionary(g => g.Name, g => _switchState.GetState(g.Name));
+            var initialized = _groups.ToDictionary(g => g.Name, g => _switchState.IsGroupInitialized(g.Name));
+
+            return new
+            {
+                States = states,
+                Initialized = initialized
+            };
+        }
+        catch (Exception ex)
+        {
+            throw new HubException($"Failed to retrieve switch state: {ex.Message}");
+        }
+    }
+
     public override async Task OnConnectedAsync()
     {
-        await Clients.Caller.SendAsync("ReceiveSwitchState", _switchState);
+        var response = new
+        {
+            States = _groups.ToDictionary(g => g.Name, g => _switchState.GetState(g.Name)),
+            Initialized = _groups.ToDictionary(g => g.Name, g => _switchState.IsGroupInitialized(g.Name))
+        };
+        await Clients.All.SendAsync("ReceiveSwitchState", response);
         await base.OnConnectedAsync();
     }
 

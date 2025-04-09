@@ -150,7 +150,10 @@
 
         function updateSwitchStates(groupName, switchState, isInitialized) {
             const group = groups.find(g => g.name === groupName);
-            if (!group) return;
+            if (!group) {
+                console.error(`Group ${groupName} not found`);
+                return;
+            }
 
             // Convert state to boolean array
             const switches = [];
@@ -172,32 +175,39 @@
             // Update binary display
             const binary = switches.map(s => s ? '1' : '0').join('');
             const registerAddress = group.modbusRegister.toString().padStart(2, '0');
-            document.getElementById(`${group.name.replace(" ", "")}Binary`).textContent =
-                `${groupName} регистр MB_RELAYS_${group.name.replace(" ", "").toUpperCase()}_ADDRESS (адрес ${registerAddress}) - ${binary.padStart(group.switchCount, '0')}`;
+            const binaryElementId = groupName.replace(" ", "") + "Binary";
+            const binaryElement = document.getElementById(binaryElementId);
+
+            if (binaryElement) {
+                binaryElement.textContent =
+                    `${groupName} регистр MB_RELAYS_${groupName.replace(" ", "").toUpperCase()}_ADDRESS (адрес ${registerAddress}) - ${binary.padStart(group.switchCount, '0')}`;
+            } else {
+                console.error(`Element with id ${binaryElementId} not found`);
+            }
         }
 
         // Handle connection events
         connection.on("ReceiveSwitchState", (state) => {
             try {
-                console.log("Received switch state update:", state);
+                console.log("Received switch state update:", JSON.stringify(state));
 
-                // Handle both old and new state formats
-                if (state.States) {
-                    // New format from SwitchController
+                // Обработка полученного формата данных
+                if (state.states && state.initialized) {
+                    // Перебираем все группы в states
+                    Object.keys(state.states).forEach(groupName => {
+                        updateSwitchStates(
+                            groupName,
+                            state.states[groupName],
+                            state.initialized[groupName] ?? false
+                        );
+                    });
+                } else if (state.States) {
+                    // Альтернативный формат (если ключи с большой буквы)
                     Object.keys(state.States).forEach(groupName => {
                         updateSwitchStates(
                             groupName,
                             state.States[groupName],
                             state.Initialized?.[groupName] ?? false
-                        );
-                    });
-                } else if (state.states) {
-                    // Old format (compatibility)
-                    Object.entries(state.states).forEach(([groupName, switchState]) => {
-                        updateSwitchStates(
-                            groupName,
-                            switchState,
-                            state.initialized?.[groupName] ?? false
                         );
                     });
                 }
