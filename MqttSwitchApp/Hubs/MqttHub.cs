@@ -79,7 +79,6 @@ public class MqttHub : Hub
 
         try
         {
-            // Отправляем только данные, без groupName и type
             await _hubContext.Clients.All.SendAsync("ReceiveModbusData", readings);
         }
         catch (Exception ex)

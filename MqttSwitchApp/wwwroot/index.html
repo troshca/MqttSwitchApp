@@ -5,7 +5,12 @@
     <title>Управление розетками</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/6.0.1/signalr.min.js"></script>
     <style>
-        body { margin: 0; font-family: Arial, sans-serif; padding: 20px; }
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+            padding: 20px;
+        }
+
         .sidenav {
             height: 100%;
             width: 0;
@@ -18,63 +23,115 @@
             transition: 0.5s;
             padding-top: 60px;
         }
-        .sidenav a {
-            padding: 8px 8px 8px 32px;
-            text-decoration: none;
-            font-size: 20px;
-            color: #818181;
-            display: block;
-            transition: 0.3s;
+
+            .sidenav a {
+                padding: 8px 8px 8px 32px;
+                text-decoration: none;
+                font-size: 20px;
+                color: #818181;
+                display: block;
+                transition: 0.3s;
+            }
+
+                .sidenav a:hover {
+                    color: #f1f1f1;
+                }
+
+            .sidenav .closebtn {
+                position: absolute;
+                top: 0;
+                right: 25px;
+                font-size: 36px;
+                margin-left: 50px;
+            }
+
+            .sidenav a.active {
+                color: #f1f1f1;
+                font-weight: bold;
+            }
+
+        .main {
+            margin-left: 0;
+            transition: margin-left .5s;
+            padding: 20px;
         }
-        .sidenav a:hover { color: #f1f1f1; }
-        .sidenav .closebtn {
-            position: absolute;
-            top: 0;
-            right: 25px;
-            font-size: 36px;
-            margin-left: 50px;
-        }
-        .sidenav a.active { color: #f1f1f1; font-weight: bold; }
-        .main { margin-left: 0; transition: margin-left .5s; padding: 20px; }
-        .hamburger { font-size: 30px; cursor: pointer; position: fixed; top: 10px; left: 10px; z-index: 2; }
-        .group { margin-bottom: 20px; }
-        .switch-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
-        .switch { padding: 10px; border: 1px solid #ccc; text-align: center; }
-        /* Стили для переключателя */
-        .switch input[type="checkbox"] {
-            -webkit-appearance: none;
-            width: 40px;
-            height: 20px;
-            background: #ccc;
-            border-radius: 10px;
-            position: relative;
-            outline: none;
+
+        .hamburger {
+            font-size: 30px;
             cursor: pointer;
-            vertical-align: middle;
-            margin-right: 5px;
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            z-index: 2;
         }
-        .switch input[type="checkbox"]:checked {
-            background: #4CAF50;
+
+        .group {
+            margin-bottom: 20px;
         }
-        .switch input[type="checkbox"]:before {
-            content: '';
-            position: absolute;
-            width: 16px;
-            height: 16px;
-            background: white;
-            border-radius: 50%;
-            top: 2px;
-            left: 2px;
-            transition: 0.2s;
+
+        .switch-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
         }
-        .switch input[type="checkbox"]:checked:before {
-            left: 22px;
+
+        .switch {
+            padding: 10px;
+            border: 1px solid #ccc;
+            text-align: center;
         }
-        .switch input[disabled] { opacity: 0.5; cursor: not-allowed; }
-        .binary-display { margin-top: 20px; font-family: monospace; }
+            /* Стили для переключателя */
+            .switch input[type="checkbox"] {
+                -webkit-appearance: none;
+                width: 40px;
+                height: 20px;
+                background: #ccc;
+                border-radius: 10px;
+                position: relative;
+                outline: none;
+                cursor: pointer;
+                vertical-align: middle;
+                margin-right: 5px;
+            }
+
+                .switch input[type="checkbox"]:checked {
+                    background: #4CAF50;
+                }
+
+                .switch input[type="checkbox"]:before {
+                    content: '';
+                    position: absolute;
+                    width: 16px;
+                    height: 16px;
+                    background: white;
+                    border-radius: 50%;
+                    top: 2px;
+                    left: 2px;
+                    transition: 0.2s;
+                }
+
+                .switch input[type="checkbox"]:checked:before {
+                    left: 22px;
+                }
+
+            .switch input[disabled] {
+                opacity: 0.5;
+                cursor: not-allowed;
+            }
+
+                .switch input[disabled].cooldown {
+                    opacity: 0.5;
+                    cursor: wait;
+                }
+
+        .binary-display {
+            margin-top: 20px;
+            font-family: monospace;
+        }
     </style>
 </head>
 <body>
+    <!-- Остальная часть HTML без изменений -->
     <div class="hamburger" onclick="toggleNav()">☰</div>
     <div id="mySidenav" class="sidenav">
         <a href="javascript:void(0)" class="closebtn" onclick="toggleNav()">×</a>
@@ -119,13 +176,13 @@
                     const switchDiv = document.createElement("div");
                     switchDiv.className = "switch";
                     switchDiv.innerHTML = `
-                        <label>
-                            <input type="checkbox" id="${group.name}_switch${i}"
-                                   onchange="toggleSwitch('${group.name}', ${i})"
-                                   disabled>
-                            Розетка ${group.startIndex + i}
-                        </label>
-                    `;
+                            <label>
+                                <input type="checkbox" id="${group.name}_switch${i}"
+                                       onchange="toggleSwitch('${group.name}', ${i})"
+                                       disabled>
+                                Розетка ${group.startIndex + i}
+                            </label>
+                        `;
                     container.appendChild(switchDiv);
                 }
             });
@@ -133,19 +190,51 @@
 
         generateSwitches();
 
-        function toggleSwitch(groupName, switchIndex) {
+        // Блокировка переключателей в группе
+        function lockGroupSwitches(groupName, lock) {
             const group = groups.find(g => g.name === groupName);
             if (!group) return;
 
+            for (let i = 0; i < group.switchCount; i++) {
+                const checkbox = document.getElementById(`${group.name}_switch${i}`);
+                if (checkbox) {
+                    checkbox.disabled = lock;
+                    if (lock) {
+                        checkbox.classList.add('cooldown');
+                    } else {
+                        checkbox.classList.remove('cooldown');
+                    }
+                }
+            }
+        }
+
+        async function toggleSwitch(groupName, switchIndex) {
+            const group = groups.find(g => g.name === groupName);
+            if (!group) return;
+
+            // Блокируем все переключатели в группе
+            lockGroupSwitches(groupName, true);
+
             const switches = Array.from(
                 { length: group.switchCount },
-                (_, i) => document.getElementById(`${groupName}_switch${i}`).checked
+                (_, i) => document.getElementById(`${group.name}_switch${i}`).checked
             );
 
-            connection.invoke("UpdateSwitchState", {
-                groupName: groupName,
-                switches: switches
-            }).catch(err => console.error("Error updating switch state:", err));
+            try {
+                await connection.invoke("UpdateSwitchState", {
+                    groupName: groupName,
+                    switches: switches
+                });
+            } catch (err) {
+                console.error("Error updating switch state:", err);
+            } finally {
+                // Разблокируем переключатели через 2 секунды
+                setTimeout(() => {
+                    const isInitialized = true; // Предполагаем, что после успешного обновления группа инициализирована
+                    updateSwitchStates(groupName, switches.reduce((acc, val, idx) => acc | (val ? 1 << idx : 0), isInitialized));
+                    lockGroupSwitches(groupName, false);
+                }, 2000);
+            }
         }
 
         function updateSwitchStates(groupName, switchState, isInitialized) {
@@ -165,10 +254,13 @@
 
             // Update checkboxes
             for (let i = 0; i < group.switchCount; i++) {
-                const checkbox = document.getElementById(`${groupName}_switch${i}`);
+                const checkbox = document.getElementById(`${group.name}_switch${i}`);
                 if (checkbox) {
-                    checkbox.checked = switches[i];
-                    checkbox.disabled = !isInitialized;
+                    // Не перезаписываем состояние, если переключатель в режиме cooldown
+                    if (!checkbox.classList.contains('cooldown')) {
+                        checkbox.checked = switches[i];
+                        checkbox.disabled = !isInitialized;
+                    }
                 }
             }
 
@@ -186,14 +278,12 @@
             }
         }
 
-        // Handle connection events
+        // Остальной код без изменений
         connection.on("ReceiveSwitchState", (state) => {
             try {
                 console.log("Received switch state update:", JSON.stringify(state));
 
-                // Обработка полученного формата данных
                 if (state.states && state.initialized) {
-                    // Перебираем все группы в states
                     Object.keys(state.states).forEach(groupName => {
                         updateSwitchStates(
                             groupName,
@@ -202,7 +292,6 @@
                         );
                     });
                 } else if (state.States) {
-                    // Альтернативный формат (если ключи с большой буквы)
                     Object.keys(state.States).forEach(groupName => {
                         updateSwitchStates(
                             groupName,
@@ -224,7 +313,6 @@
         connection.start()
             .then(() => {
                 console.log("SignalR connected");
-                // Request initial state after connection
                 connection.invoke("GetSwitchState")
                     .catch(err => console.error("Error requesting initial state:", err));
             })
@@ -233,7 +321,6 @@
                 setTimeout(() => connection.start(), 5000);
             });
 
-        // Navigation toggle function remains the same
         function toggleNav() {
             const sidenav = document.getElementById("mySidenav");
             const main = document.querySelector(".main");
