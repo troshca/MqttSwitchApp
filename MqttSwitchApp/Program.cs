@@ -53,6 +53,11 @@ app.MapGet("/settings", async context =>
     context.Response.ContentType = "text/html; charset=utf-8";
     await context.Response.WriteAsync(File.ReadAllText("wwwroot/settings.html"));
 });
+app.MapGet("/socket_readings", async context =>
+{
+    context.Response.ContentType = "text/html; charset=utf-8";
+    await context.Response.WriteAsync(File.ReadAllText("wwwroot/socket_readings.html"));
+});
 
 app.Lifetime.ApplicationStopped.Register(async () =>
 {

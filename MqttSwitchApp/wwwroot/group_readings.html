@@ -70,36 +70,53 @@
             margin-bottom: 20px;
         }
 
+        .socket-container {
+            margin: 20px 0;
+            text-align: center;
+        }
+
+        .socket-title {
+            font-size: 18px;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+
+            .socket-title a {
+                color: #0066cc;
+                text-decoration: none;
+            }
+
+                .socket-title a:hover {
+                    text-decoration: underline;
+                }
+
+        .socket-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 0 auto;
+            max-width: 800px;
+        }
+
+            .socket-table th, .socket-table td {
+                border: 1px solid #ddd;
+                padding: 8px;
+                text-align: center;
+            }
+
+            .socket-table th {
+                background-color: #f2f2f2;
+                font-weight: bold;
+            }
+
+            .socket-table tr:nth-child(even) {
+                background-color: #f9f9f9;
+            }
+
         .group-params {
             display: flex;
             justify-content: center;
             gap: 20px;
-        }
-
-        .socket-container {
-            margin: 10px 0;
-        }
-
-        .spoiler {
-            display: none;
-            margin-left: 20px;
-        }
-
-            .spoiler.active {
-                display: block;
-            }
-
-        .spoiler-toggle {
-            cursor: pointer;
-            font-weight: bold;
-        }
-
-            .spoiler-toggle:hover {
-                text-decoration: underline;
-            }
-
-        .rms-data, .inst-data {
-            margin: 10px 0;
+            margin-bottom: 20px;
         }
     </style>
 </head>
@@ -161,34 +178,98 @@
         for (let i = 0; i < group.switchCount; i++) {
             const socketDiv = document.createElement("div");
             socketDiv.className = "socket-container";
+
+            const socketNumber = group.startIndex + i;
             socketDiv.innerHTML = `
-                    <div class="spoiler-toggle" onclick="toggleSpoiler('socket${i}')">Розетка ${group.startIndex + i}</div>
-                    <div id="socket${i}" class="spoiler">
-                        <div class="rms-data">
-                            <h4>RMS Показания</h4>
-                            <p>Напряжение: <span id="socket${i}_voltageRms">0</span> В</p>
-                            <p>Ток: <span id="socket${i}_currentRms">0</span> А</p>
-                            <p>Активная мощность: <span id="socket${i}_activePowerRms">0</span> Вт</p>
-                            <p>Реактивная мощность: <span id="socket${i}_reactivePowerRms">0</span> вар</p>
-                            <p>Частота: <span id="socket${i}_freqRms">0</span> Гц</p>
-                        </div>
-                        <div class="inst-data">
-                            <h4>Мгновенные Показания</h4>
-                            <p>Напряжение: <span id="socket${i}_voltageInst">0</span> В</p>
-                            <p>Ток: <span id="socket${i}_currentInst">0</span> А</p>
-                            <p>Активная мощность: <span id="socket${i}_activePowerInst">0</span> Вт</p>
-                            <p>Реактивная мощность: <span id="socket${i}_reactivePowerInst">0</span> вар</p>
-                            <p>Частота: <span id="socket${i}_freqInst">0</span> Гц</p>
-                        </div>
+                    <div class="socket-title">
+                        <a href="/socket_readings?group=${groupIndex}&socket=${i}">Розетка ${socketNumber}</a>
                     </div>
+                    <table class="socket-table">
+                        <thead>
+                            <tr>
+                                <th>Параметр</th>
+                                <th>Напряжение (В)</th>
+                                <th>Ток (А)</th>
+                                <th>Активная мощность (Вт)</th>
+                                <th>Реактивная мощность (вар)</th>
+                                <th>Частота (Гц)</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>RMS</td>
+                                <td id="socket${i}_voltageRms">0</td>
+                                <td id="socket${i}_currentRms">0</td>
+                                <td id="socket${i}_activePowerRms">0</td>
+                                <td id="socket${i}_reactivePowerRms">0</td>
+                                <td id="socket${i}_freqRms">0</td>
+                            </tr>
+                            <tr>
+                                <td>Мгновенное</td>
+                                <td id="socket${i}_voltageInst">0</td>
+                                <td id="socket${i}_currentInst">0</td>
+                                <td id="socket${i}_activePowerInst">0</td>
+                                <td id="socket${i}_reactivePowerInst">0</td>
+                                <td id="socket${i}_freqInst">0</td>
+                            </tr>
+                        </tbody>
+                    </table>
                 `;
             socketsContainer.appendChild(socketDiv);
         }
 
-        function toggleSpoiler(socketId) {
-            const spoiler = document.getElementById(socketId);
-            spoiler.classList.toggle("active");
+        function combineRegisters(low, high) {
+            return (high << 16) | low;
         }
+
+        function updateReadings(data) {
+            const groupRegisterCount = 20;
+            const socketRegisterCount = 20;
+            const firstNumber = 60;
+            const baseGroupOffset = groupRegisterCount * groupIndex;
+            const totalRegisters = groupRegisterCount + group.switchCount * socketRegisterCount;
+
+            if (!Array.isArray(data) || data.length < totalRegisters) {
+                console.error("Invalid data format or not enough data");
+                return;
+            }
+
+            // Групповые параметры
+            document.getElementById("voltageRms").textContent = (combineRegisters(data[0 + baseGroupOffset], data[1 + baseGroupOffset]) / 1000).toFixed(3);
+            document.getElementById("voltageInst").textContent = (combineRegisters(data[10 + baseGroupOffset], data[11 + baseGroupOffset]) / 1000).toFixed(3);
+            document.getElementById("freqRms").textContent = (combineRegisters(data[8 + baseGroupOffset], data[9 + baseGroupOffset]) / 1000).toFixed(2);
+            document.getElementById("freqInst").textContent = (combineRegisters(data[18 + baseGroupOffset], data[19 + baseGroupOffset]) / 1000).toFixed(2);
+
+            // Параметры розеток
+            for (let i = 0; i < group.switchCount; i++) {
+                const baseSocketOffset = baseGroupOffset + firstNumber + (i * socketRegisterCount);
+
+                // RMS
+                document.getElementById(`socket${i}_voltageRms`).textContent = (combineRegisters(data[0 + baseSocketOffset], data[1 + baseSocketOffset]) / 1000).toFixed(3);
+                document.getElementById(`socket${i}_currentRms`).textContent = (combineRegisters(data[2 + baseSocketOffset], data[3 + baseSocketOffset]) / 1000).toFixed(3);
+                document.getElementById(`socket${i}_activePowerRms`).textContent = (combineRegisters(data[4 + baseSocketOffset], data[5 + baseSocketOffset]) / 1000).toFixed(3);
+                document.getElementById(`socket${i}_reactivePowerRms`).textContent = (combineRegisters(data[6 + baseSocketOffset], data[7 + baseSocketOffset]) / 1000).toFixed(3);
+                document.getElementById(`socket${i}_freqRms`).textContent = (combineRegisters(data[8 + baseSocketOffset], data[9 + baseSocketOffset]) / 1000).toFixed(2);
+
+                // Мгновенные
+                document.getElementById(`socket${i}_voltageInst`).textContent = (combineRegisters(data[10 + baseSocketOffset], data[11 + baseSocketOffset]) / 1000).toFixed(3);
+                document.getElementById(`socket${i}_currentInst`).textContent = (combineRegisters(data[12 + baseSocketOffset], data[13 + baseSocketOffset]) / 1000).toFixed(3);
+                document.getElementById(`socket${i}_activePowerInst`).textContent = (combineRegisters(data[14 + baseSocketOffset], data[15 + baseSocketOffset]) / 1000).toFixed(3);
+                document.getElementById(`socket${i}_reactivePowerInst`).textContent = (combineRegisters(data[16 + baseSocketOffset], data[17 + baseSocketOffset]) / 1000).toFixed(3);
+                document.getElementById(`socket${i}_freqInst`).textContent = (combineRegisters(data[18 + baseSocketOffset], data[19 + baseSocketOffset]) / 1000).toFixed(2);
+            }
+        }
+
+        connection.on("ReceiveModbusData", (data) => {
+            console.log("Received data:", data);
+            updateReadings(data);
+        });
+
+        connection.start()
+            .then(() => {
+                console.log("SignalR connected");
+            })
+            .catch(err => console.error("SignalR connection error:", err));
 
         function toggleNav() {
             const sidenav = document.getElementById("mySidenav");
@@ -201,75 +282,6 @@
                 main.style.marginLeft = "250px";
             }
         }
-
-        function combineRegisters(low, high) {
-            return (high << 16) | low;
-        }
-
-        function updateReadings(data) {
-            try {
-                if (!Array.isArray(data)) {
-                    console.error("Invalid data format - expected array:", data);
-                    return;
-                }
-
-                const groupRegisterCount = 20;
-                const socketRegisterCount = 20;
-                const totalRegisters = groupRegisterCount + group.switchCount * socketRegisterCount;
-
-                if (data.length < totalRegisters) {
-                    console.error(`Not enough data. Expected ${totalRegisters}, got ${data.length}`);
-                    return;
-                }
-
-                // Групповые параметры (первые 20 регистров)
-                document.getElementById("voltageRms").textContent = combineRegisters(data[0], data[1]) / 1000;
-                document.getElementById("voltageInst").textContent = combineRegisters(data[10], data[11]) / 1000;
-                document.getElementById("freqRms").textContent = combineRegisters(data[8], data[9]) / 1000;
-                document.getElementById("freqInst").textContent = combineRegisters(data[18], data[19]) / 1000;
-
-                // Параметры розеток (остальные регистры)
-                for (let i = 0; i < group.switchCount; i++) {
-                    const offset = groupRegisterCount + i * socketRegisterCount;
-
-                    // RMS
-                    document.getElementById(`socket${i}_voltageRms`).textContent = combineRegisters(data[offset], data[offset + 1]) / 1000;
-                    document.getElementById(`socket${i}_currentRms`).textContent = combineRegisters(data[offset + 2], data[offset + 3]) / 1000;
-                    document.getElementById(`socket${i}_activePowerRms`).textContent = combineRegisters(data[offset + 4], data[offset + 5]) / 1000;
-                    document.getElementById(`socket${i}_reactivePowerRms`).textContent = combineRegisters(data[offset + 6], data[offset + 7]) / 1000;
-                    document.getElementById(`socket${i}_freqRms`).textContent = combineRegisters(data[offset + 8], data[offset + 9]) / 1000;
-
-                    // Мгновенные
-                    document.getElementById(`socket${i}_voltageInst`).textContent = combineRegisters(data[offset + 10], data[offset + 11] / 1000);
-                    document.getElementById(`socket${i}_currentInst`).textContent = combineRegisters(data[offset + 12], data[offset + 13]) / 1000;
-                    document.getElementById(`socket${i}_activePowerInst`).textContent = combineRegisters(data[offset + 14], data[offset + 15] / 1000);
-                    document.getElementById(`socket${i}_reactivePowerInst`).textContent = combineRegisters(data[offset + 16], data[offset + 17] / 1000);
-                    document.getElementById(`socket${i}_freqInst`).textContent = combineRegisters(data[offset + 18], data[offset + 19]) / 1000;
-                }
-            } catch (err) {
-                console.error("Error updating readings:", err);
-            }
-        }
-
-        connection.on("ReceiveModbusData", (readings) => {
-            console.log("Received modbus data:", readings);
-            try {
-                if (Array.isArray(readings)) {
-                    updateReadings(readings);
-                } else {
-                    console.error("Invalid data format - expected array:", readings);
-                }
-            } catch (err) {
-                console.error("Error processing modbus data:", err);
-            }
-        });;
-
-        connection.start()
-            .then(() => {
-                console.log("SignalR connected");
-                // Убрано connection.invoke("RequestModbusData", ...)
-            })
-            .catch(err => console.error("SignalR connection error:", err));
     </script>
 </body>
 </html>

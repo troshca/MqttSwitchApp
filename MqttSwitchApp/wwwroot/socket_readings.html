@@ -1,0 +1,281 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Показания розетки</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/6.0.1/signalr.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+            padding: 20px;
+        }
+
+        .sidenav {
+            height: 100%;
+            width: 0;
+            position: fixed;
+            z-index: 1;
+            top: 0;
+            left: 0;
+            background-color: #111;
+            overflow-x: hidden;
+            transition: 0.5s;
+            padding-top: 60px;
+        }
+
+            .sidenav a {
+                padding: 8px 8px 8px 32px;
+                text-decoration: none;
+                font-size: 20px;
+                color: #818181;
+                display: block;
+                transition: 0.3s;
+            }
+
+                .sidenav a:hover {
+                    color: #f1f1f1;
+                }
+
+            .sidenav .closebtn {
+                position: absolute;
+                top: 0;
+                right: 25px;
+                font-size: 36px;
+                margin-left: 50px;
+            }
+
+            .sidenav a.active {
+                color: #f1f1f1;
+                font-weight: bold;
+            }
+
+        .main {
+            margin-left: 0;
+            transition: margin-left .5s;
+            padding: 20px;
+        }
+
+        .hamburger {
+            font-size: 30px;
+            cursor: pointer;
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            z-index: 2;
+        }
+
+        .socket-header {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        .socket-params {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        .param-card {
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 15px;
+            background-color: #f9f9f9;
+        }
+
+            .param-card h3 {
+                margin-top: 0;
+                color: #333;
+                border-bottom: 1px solid #ddd;
+                padding-bottom: 10px;
+            }
+
+        .param-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+
+        .param-label {
+            font-weight: bold;
+            color: #555;
+        }
+
+        .param-value {
+            font-family: monospace;
+            font-size: 16px;
+        }
+
+        .unit {
+            color: #777;
+            margin-left: 3px;
+        }
+    </style>
+</head>
+<body>
+    <div class="hamburger" onclick="toggleNav()">☰</div>
+    <div id="mySidenav" class="sidenav">
+        <a href="javascript:void(0)" class="closebtn" onclick="toggleNav()">×</a>
+        <a href="/" id="homeLink">Управление розетками</a>
+        <!-- Пункты меню для групп добавляются динамически -->
+    </div>
+
+    <div class="main">
+        <div class="socket-header">
+            <h1 id="socketTitle">Розетка</h1>
+        </div>
+
+        <div class="socket-params">
+            <div class="param-card">
+                <h3>RMS Показания</h3>
+                <div class="param-row">
+                    <span class="param-label">Напряжение:</span>
+                    <span class="param-value" id="voltageRms">0<span class="unit">В</span></span>
+                </div>
+                <div class="param-row">
+                    <span class="param-label">Ток:</span>
+                    <span class="param-value" id="currentRms">0<span class="unit">А</span></span>
+                </div>
+                <div class="param-row">
+                    <span class="param-label">Активная мощность:</span>
+                    <span class="param-value" id="activePowerRms">0<span class="unit">Вт</span></span>
+                </div>
+                <div class="param-row">
+                    <span class="param-label">Реактивная мощность:</span>
+                    <span class="param-value" id="reactivePowerRms">0<span class="unit">вар</span></span>
+                </div>
+                <div class="param-row">
+                    <span class="param-label">Частота:</span>
+                    <span class="param-value" id="freqRms">0<span class="unit">Гц</span></span>
+                </div>
+            </div>
+
+            <div class="param-card">
+                <h3>Мгновенные Показания</h3>
+                <div class="param-row">
+                    <span class="param-label">Напряжение:</span>
+                    <span class="param-value" id="voltageInst">0<span class="unit">В</span></span>
+                </div>
+                <div class="param-row">
+                    <span class="param-label">Ток:</span>
+                    <span class="param-value" id="currentInst">0<span class="unit">А</span></span>
+                </div>
+                <div class="param-row">
+                    <span class="param-label">Активная мощность:</span>
+                    <span class="param-value" id="activePowerInst">0<span class="unit">Вт</span></span>
+                </div>
+                <div class="param-row">
+                    <span class="param-label">Реактивная мощность:</span>
+                    <span class="param-value" id="reactivePowerInst">0<span class="unit">вар</span></span>
+                </div>
+                <div class="param-row">
+                    <span class="param-label">Частота:</span>
+                    <span class="param-value" id="freqInst">0<span class="unit">Гц</span></span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const connection = new signalR.HubConnectionBuilder()
+            .withUrl("/mqttHub")
+            .build();
+
+        // Получаем параметры из URL
+        const urlParams = new URLSearchParams(window.location.search);
+        const groupIndex = parseInt(urlParams.get("group")) || 0;
+        const socketIndex = parseInt(urlParams.get("socket")) || 0;
+
+        const groups = [
+            { name: "Группа 1", switchCount: 9, startIndex: 1, modbusOffset: 0 },
+            { name: "Группа 2", switchCount: 9, startIndex: 10, modbusOffset: 1 }
+        ];
+
+        const group = groups[groupIndex] || groups[0];
+        const socketNumber = group.startIndex + socketIndex;
+
+        // Устанавливаем заголовок
+        document.getElementById("socketTitle").textContent = `Розетка ${socketNumber} (${group.name})`;
+
+        // Генерация меню
+        const sidenav = document.getElementById("mySidenav");
+        groups.forEach((group, gIndex) => {
+            for (let sIndex = 0; sIndex < group.switchCount; sIndex++) {
+                const link = document.createElement("a");
+                const socketNum = group.startIndex + sIndex;
+                link.href = `/socket_readings?group=${gIndex}&socket=${sIndex}`;
+                link.textContent = `Розетка ${socketNum} (${group.name})`;
+                if (gIndex === groupIndex && sIndex === socketIndex) {
+                    link.classList.add("active");
+                }
+                sidenav.appendChild(link);
+            }
+        });
+
+        const settingsLink = document.createElement("a");
+        settingsLink.href = "/settings";
+        settingsLink.textContent = "Настройки";
+        sidenav.appendChild(settingsLink);
+
+        function combineRegisters(low, high) {
+            return (high << 16) | low;
+        }
+
+        function updateReadings(data) {
+            try {
+                if (!Array.isArray(data)) {
+                    console.error("Invalid data format - expected array:", data);
+                    return;
+                }
+
+                const socketRegisterCount = 20;
+                const offset = socketIndex * socketRegisterCount;
+
+                if (data.length < offset + socketRegisterCount) {
+                    console.error(`Not enough data for socket ${socketIndex}`);
+                    return;
+                }
+
+                // RMS Показания
+                document.getElementById("voltageRms").textContent = (combineRegisters(data[offset], data[offset + 1]) / 1000).toFixed(3);
+                document.getElementById("currentRms").textContent = (combineRegisters(data[offset + 2], data[offset + 3]) / 1000).toFixed(3);
+                document.getElementById("activePowerRms").textContent = (combineRegisters(data[offset + 4], data[offset + 5]) / 1000).toFixed(3);
+                document.getElementById("reactivePowerRms").textContent = (combineRegisters(data[offset + 6], data[offset + 7]) / 1000).toFixed(3);
+                document.getElementById("freqRms").textContent = (combineRegisters(data[offset + 8], data[offset + 9]) / 1000).toFixed(2);
+
+                // Мгновенные Показания
+                document.getElementById("voltageInst").textContent = (combineRegisters(data[offset + 10], data[offset + 11]) / 1000).toFixed(3);
+                document.getElementById("currentInst").textContent = (combineRegisters(data[offset + 12], data[offset + 13]) / 1000).toFixed(3);
+                document.getElementById("activePowerInst").textContent = (combineRegisters(data[offset + 14], data[offset + 15]) / 1000).toFixed(3);
+                document.getElementById("reactivePowerInst").textContent = (combineRegisters(data[offset + 16], data[offset + 17]) / 1000).toFixed(3);
+                document.getElementById("freqInst").textContent = (combineRegisters(data[offset + 18], data[offset + 19]) / 1000).toFixed(2);
+            } catch (err) {
+                console.error("Error updating readings:", err);
+            }
+        }
+
+        connection.on("ReceiveModbusData", (data) => {
+            console.log("Received modbus data:", data);
+            updateReadings(data);
+        });
+
+        connection.start()
+            .then(() => {
+                console.log("SignalR connected");
+            })
+            .catch(err => console.error("SignalR connection error:", err));
+
+        function toggleNav() {
+            const sidenav = document.getElementById("mySidenav");
+            const main = document.querySelector(".main");
+            if (sidenav.style.width === "250px") {
+                sidenav.style.width = "0";
+                main.style.marginLeft = "0";
+            } else {
+                sidenav.style.width = "250px";
+                main.style.marginLeft = "250px";
+            }
+        }
+    </script>
+</body>
+</html>
