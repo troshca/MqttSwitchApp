@@ -19,7 +19,7 @@ public class ModbusService : IDisposable, IAsyncDisposable
     private List<Task> _pollRegisterTasks = new List<Task>(); // Отслеживаем все задачи групп
 
     public event Action<string, ushort> OnSwitchStateChanged;
-    public event Func<string, string, ushort[], Task> OnReadingsUpdated;
+    public event Func<string, string, ModbusReadingData, Task> OnReadingsUpdated;
 
     public ModbusService(ModbusRtuRgbam rgbamSettings, List<GroupConfig> groups)
     {
@@ -75,20 +75,75 @@ public class ModbusService : IDisposable, IAsyncDisposable
             try
             {
                 _mutex.WaitOne();
+
+                // Чтение состояния реле
                 var registers = _modbusMaster.ReadHoldingRegisters(_rgbamSettings.DeviceAddress, group.ModbusRegister, 1);
+
+                // Чтение статуса реле
+                var statusKey = group.Name.Contains("1") ? "Group1Status" : "Group2Status";
+                ushort statusValue = 0x10; // Значение по умолчанию
+
+                if (_rgbamSettings.StatusRegisters.TryGetValue(statusKey, out var statusRegister))
+                {
+                    var status = _modbusMaster.ReadHoldingRegisters(_rgbamSettings.DeviceAddress, statusRegister, 1);
+                    Console.WriteLine($"Raw status read for {group.Name}: 0x{status[0]:X2}"); // Логирование сырого значения
+                    if (status != null && status.Length > 0)
+                    {
+                        statusValue = status[0];
+                    }
+                    else
+                    {
+                        Console.WriteLine($"Warning: Status array for {group.Name} is empty or null");
+                    }
+                }
+                else
+                {
+                    Console.WriteLine($"Warning: Status register for {statusKey} not found in configuration");
+                }
+
                 if (_switchStates[group.Name] != registers[0] && !_isWriting)
                 {
                     _switchStates[group.Name] = registers[0];
                     Console.WriteLine($"{group.Name} updated from Modbus: {string.Join(",", Enumerable.Range(0, group.SwitchCount).Select(i => (registers[0] & (1 << i)) != 0))}");
                     OnSwitchStateChanged?.Invoke(group.Name, registers[0]);
                 }
+
                 _isInitialized[group.Name] = true;
-                Console.WriteLine($"{group.Name} read from Modbus: {registers[0]} (Binary: {Convert.ToString(registers[0], 2).PadLeft(group.SwitchCount, '0')})");
+
+                // Отправка обновленных данных
+                if (OnReadingsUpdated != null && !_disposed)
+                {
+                    var readingData = new ModbusReadingData
+                    {
+                        GroupName = group.Name,
+                        Registers = new[] { registers[0] },
+                        Status = statusValue,
+                        UpdateType = "status_update"
+                    };
+                    Console.WriteLine($"Sending data for {group.Name}: Status = 0x{statusValue:X2}, Registers = {registers[0]}");
+                    await OnReadingsUpdated.Invoke(group.Name, "status_update", readingData);
+                }
+
+                Console.WriteLine($"{group.Name} read from Modbus: {registers[0]} " +
+                    $"(Binary: {Convert.ToString(registers[0], 2).PadLeft(group.SwitchCount, '0')}) " +
+                    $"Status: 0x{statusValue:X2}");
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"Error reading Modbus {group.Name} register: {ex.Message}");
                 _isInitialized[group.Name] = false;
+
+                // Отправка статуса ошибки
+                if (OnReadingsUpdated != null && !_disposed)
+                {
+                    await OnReadingsUpdated.Invoke(group.Name, "error", new ModbusReadingData
+                    {
+                        GroupName = group.Name,
+                        Registers = Array.Empty<ushort>(),
+                        Status = 0x10, // RELAYS_NOT_INITIALIZED
+                        UpdateType = "error"
+                    });
+                }
             }
             finally
             {
@@ -113,6 +168,29 @@ public class ModbusService : IDisposable, IAsyncDisposable
         Console.WriteLine($"{group.Name} polling stopped.");
     }
 
+    public ushort GetRelayStatus(string groupName)
+    {
+        try
+        {
+            _mutex.WaitOne();
+            var group = _groups.FirstOrDefault(g => g.Name == groupName);
+            if (group == null) return 0x10; // RELAYS_NOT_INITIALIZED
+
+            var statusRegister = _rgbamSettings.StatusRegisters[$"{groupName}Status"];
+            var status = _modbusMaster.ReadHoldingRegisters(_rgbamSettings.DeviceAddress, statusRegister, 1);
+            return status.Length > 0 ? status[0] : (ushort)0x10;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error reading relay status for {groupName}: {ex.Message}");
+            return 0x10; // RELAYS_NOT_INITIALIZED
+        }
+        finally
+        {
+            _mutex.ReleaseMutex();
+        }
+    }
+
     private async Task PollReadingsAsync(CancellationToken cancellationToken)
     {
         const int groupRegisterCount = 20;
@@ -130,11 +208,14 @@ public class ModbusService : IDisposable, IAsyncDisposable
 
                     try
                     {
+                        // Чтение статуса реле
+                        var status = GetRelayStatus(group.Name);
+
                         int groupBase = group.ModbusOffset * groupRegisterCount;
                         var groupRegisters = ReadHoldingRegisters((ushort)groupBase, groupRegisterCount);
 
                         // Создаем массив для всех данных группы и розеток
-                        var allRegisters = new ushort[groupRegisterCount + group.SwitchCount * socketRegisterCount];
+                        var allRegisters = new ushort[groupRegisterCount + group.SwitchCount * socketRegisterCount + 1]; // +1 для статуса
 
                         // Копируем данные группы
                         Array.Copy(groupRegisters, 0, allRegisters, 0, groupRegisterCount);
@@ -147,9 +228,18 @@ public class ModbusService : IDisposable, IAsyncDisposable
                             Array.Copy(socketRegisters, 0, allRegisters, groupRegisterCount + i * socketRegisterCount, socketRegisterCount);
                         }
 
+                        // Добавляем статус в конец массива
+                        allRegisters[allRegisters.Length - 1] = status;
+
                         if (OnReadingsUpdated != null && !_disposed)
                         {
-                            await OnReadingsUpdated.Invoke(group.Name, "all", allRegisters);
+                            await OnReadingsUpdated.Invoke(group.Name, "all", new ModbusReadingData
+                            {
+                                GroupName = group.Name,
+                                Registers = allRegisters,
+                                Status = status,
+                                UpdateType = "all"
+                            });
                         }
                     }
                     catch (Exception ex)
@@ -273,7 +363,7 @@ public class ModbusService : IDisposable, IAsyncDisposable
         }
     }
 
-    private async Task SafeInvokeReadingsUpdated(string groupName, string type, ushort[] readings)
+    private async Task SafeInvokeReadingsUpdated(string groupName, string type, ModbusReadingData readings)
     {
         try
         {
@@ -283,12 +373,11 @@ public class ModbusService : IDisposable, IAsyncDisposable
                 {
                     try
                     {
-                        await ((Func<string, string, ushort[], Task>)handler)(groupName, type, readings);
+                        await ((Func<string, string, ModbusReadingData, Task>)handler)(groupName, type, readings);
                     }
                     catch (ObjectDisposedException)
                     {
-                        // Remove the disposed handler
-                        OnReadingsUpdated -= (Func<string, string, ushort[], Task>)handler;
+                        OnReadingsUpdated -= (Func<string, string, ModbusReadingData, Task>)handler;
                         Console.WriteLine("Removed disposed handler from OnReadingsUpdated");
                     }
                     catch (Exception ex)
@@ -303,4 +392,12 @@ public class ModbusService : IDisposable, IAsyncDisposable
             Console.WriteLine($"Error in SafeInvokeReadingsUpdated: {ex.Message}");
         }
     }
+}
+
+public class ModbusReadingData
+{
+    public string GroupName { get; set; }
+    public ushort[] Registers { get; set; }
+    public ushort Status { get; set; }
+    public string UpdateType { get; set; }
 }

@@ -9,14 +9,27 @@ public class HubLifetimeService : IHostedService
     {
         _hubContext = hubContext;
         _modbusService = modbusService;
-        _modbusService.OnReadingsUpdated += BroadcastReadings;
+        _modbusService.OnReadingsUpdated += async (groupName, type, readings) =>
+        {
+            await BroadcastReadings(groupName, type, readings);
+        };
     }
 
-    private async Task BroadcastReadings(string groupName, string type, ushort[] readings)
+    private async Task BroadcastReadings(string groupName, string type, ModbusReadingData readings)
     {
         try
         {
-            await _hubContext.Clients.All.SendAsync("ReceiveModbusData", groupName, type, readings);
+            var data = new
+            {
+                GroupName = readings.GroupName,
+                UpdateType = readings.UpdateType,
+                Registers = readings.Registers,
+                Status = readings.Status,
+                State = readings.UpdateType == "status_update" && readings.Registers?.Length > 0
+                    ? readings.Registers[0]
+                    : (ushort?)null
+            };
+            await _hubContext.Clients.All.SendAsync("ReceiveModbusData", data);
         }
         catch (Exception ex)
         {
@@ -28,7 +41,10 @@ public class HubLifetimeService : IHostedService
 
     public Task StopAsync(CancellationToken cancellationToken)
     {
-        _modbusService.OnReadingsUpdated -= BroadcastReadings;
+        _modbusService.OnReadingsUpdated -= async (groupName, type, readings) =>
+        {
+            await BroadcastReadings(groupName, type, readings);
+        };
         return Task.CompletedTask;
     }
 }

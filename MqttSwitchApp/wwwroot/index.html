@@ -128,6 +128,36 @@
             margin-top: 20px;
             font-family: monospace;
         }
+        .status {
+            margin-top: 5px;
+            font-size: 14px;
+            padding: 5px;
+            border-radius: 4px;
+        }
+
+        .status-error {
+            color: #721c24;
+            background-color: #f8d7da;
+            border: 1px solid #f5c6cb;
+        }
+
+        .status-info {
+            color: #0c5460;
+            background-color: #d1ecf1;
+            border: 1px solid #bee5eb;
+        }
+
+        .status-warning {
+            color: #856404;
+            background-color: #fff3cd;
+            border: 1px solid #ffeeba;
+        }
+
+        .status-normal {
+            color: #155724;
+            background-color: #d4edda;
+            border: 1px solid #c3e6cb;
+        }
     </style>
 </head>
 <body>
@@ -145,10 +175,12 @@
         <h1>Управление розетками</h1>
         <div class="group">
             <h2>Группа 1</h2>
+            <div class="group-status" id="group1Status">Статус: загрузка...</div>
             <div class="switch-grid" id="group1Switches"></div>
         </div>
         <div class="group">
             <h2>Группа 2</h2>
+            <div class="group-status" id="group2Status">Статус: загрузка...</div>
             <div class="switch-grid" id="group2Switches"></div>
         </div>
         <div class="binary-display">
@@ -158,20 +190,58 @@
     </div>
 
     <script>
+
+        const statusDescriptions = {
+            0x10: { text: "Не инициализированы", class: "status-not-initialized" },
+            0x11: { text: "Инициализированы", class: "status-info" },
+            0x15: { text: "Требуется сброс", class: "status-warning" },
+            0x16: { text: "Требуется восстановление", class: "status-warning" },
+            0x17: { text: "Требуется восстановление без защелки", class: "status-warning" },
+            0x20: { text: "Сброшены", class: "status-info" },
+            0x30: { text: "Требуется изменение", class: "status-warning" },
+            0x40: { text: "Нормальная работа", class: "status-normal" }
+        };
+
+
         const connection = new signalR.HubConnectionBuilder()
             .withUrl("/mqttHub")
             .build();
 
         const groups = [
-            { name: "Группа 1", switchCount: 9, startIndex: 1, modbusRegister: 2 },
-            { name: "Группа 2", switchCount: 9, startIndex: 10, modbusRegister: 4 }
+            {
+                name: "Группа 1",
+                switchCount: 9,
+                startIndex: 1,
+                modbusRegister: 2,
+                statusRegister: 1,
+                status: null
+            },
+            {
+                name: "Группа 2",
+                switchCount: 9,
+                startIndex: 10,
+                modbusRegister: 4,
+                statusRegister: 3,
+                status: null
+            }
         ];
+
+        const statusCodes = {
+            0x10: { text: "Не инициализированы", class: "status-error" },
+            0x11: { text: "Инициализированы", class: "status-info" },
+            0x15: { text: "Требуется сброс", class: "status-warning" },
+            0x16: { text: "Требуется восстановление", class: "status-warning" },
+            0x17: { text: "Требуется восстановление без защелки", class: "status-warning" },
+            0x20: { text: "Сброшены", class: "status-info" },
+            0x30: { text: "Требуется изменение", class: "status-warning" },
+            0x40: { text: "Нормальная работа", class: "status-normal" }
+        };
 
         // Генерация переключателей
         function generateSwitches() {
             groups.forEach((group, index) => {
                 const container = document.getElementById(`group${index + 1}Switches`);
-                container.innerHTML = ''; // Clear existing switches
+                container.innerHTML = '';
                 for (let i = 0; i < group.switchCount; i++) {
                     const switchDiv = document.createElement("div");
                     switchDiv.className = "switch";
@@ -190,29 +260,10 @@
 
         generateSwitches();
 
-        // Блокировка переключателей в группе
-        function lockGroupSwitches(groupName, lock) {
-            const group = groups.find(g => g.name === groupName);
-            if (!group) return;
-
-            for (let i = 0; i < group.switchCount; i++) {
-                const checkbox = document.getElementById(`${group.name}_switch${i}`);
-                if (checkbox) {
-                    checkbox.disabled = lock;
-                    if (lock) {
-                        checkbox.classList.add('cooldown');
-                    } else {
-                        checkbox.classList.remove('cooldown');
-                    }
-                }
-            }
-        }
-
         async function toggleSwitch(groupName, switchIndex) {
             const group = groups.find(g => g.name === groupName);
-            if (!group) return;
+            if (!group || group.status !== 0x40) return; // Проверяем статус RELAYS_NORMAL_WORK
 
-            // Блокируем все переключатели в группе
             lockGroupSwitches(groupName, true);
 
             const switches = Array.from(
@@ -228,10 +279,8 @@
             } catch (err) {
                 console.error("Error updating switch state:", err);
             } finally {
-                // Разблокируем переключатели через 2 секунды
                 setTimeout(() => {
-                    const isInitialized = true; // Предполагаем, что после успешного обновления группа инициализирована
-                    updateSwitchStates(groupName, switches.reduce((acc, val, idx) => acc | (val ? 1 << idx : 0), isInitialized));
+                    // После таймера обновляем состояние, но проверяем статус группы
                     lockGroupSwitches(groupName, false);
                 }, 2000);
             }
@@ -239,74 +288,161 @@
 
         function updateSwitchStates(groupName, switchState, isInitialized) {
             const group = groups.find(g => g.name === groupName);
-            if (!group) {
-                console.error(`Group ${groupName} not found`);
-                return;
-            }
+            if (!group) return;
 
-            // Convert state to boolean array
             const switches = [];
             for (let i = 0; i < group.switchCount; i++) {
                 switches.push((switchState & (1 << i)) !== 0);
             }
 
-            console.log(`${groupName} updated: ${switches.map(s => s ? '1' : '0').join('')}`);
-
-            // Update checkboxes
             for (let i = 0; i < group.switchCount; i++) {
                 const checkbox = document.getElementById(`${group.name}_switch${i}`);
-                if (checkbox) {
-                    // Не перезаписываем состояние, если переключатель в режиме cooldown
-                    if (!checkbox.classList.contains('cooldown')) {
-                        checkbox.checked = switches[i];
-                        checkbox.disabled = !isInitialized;
-                    }
+                if (checkbox && !checkbox.classList.contains('cooldown')) {
+                    checkbox.checked = switches[i];
+                    // Разблокируем только если статус 0x40
+                    checkbox.disabled = group.status !== 0x40;
                 }
             }
 
-            // Update binary display
             const binary = switches.map(s => s ? '1' : '0').join('');
             const registerAddress = group.modbusRegister.toString().padStart(2, '0');
-            const binaryElementId = groupName.replace(" ", "") + "Binary";
-            const binaryElement = document.getElementById(binaryElementId);
-
+            const binaryElement = document.getElementById(`${groupName.replace(" ", "")}Binary`);
             if (binaryElement) {
                 binaryElement.textContent =
                     `${groupName} регистр MB_RELAYS_${groupName.replace(" ", "").toUpperCase()}_ADDRESS (адрес ${registerAddress}) - ${binary.padStart(group.switchCount, '0')}`;
-            } else {
-                console.error(`Element with id ${binaryElementId} not found`);
             }
         }
 
-        // Остальной код без изменений
+        // Обновленный обработчик ReceiveSwitchState
         connection.on("ReceiveSwitchState", (state) => {
-            try {
-                console.log("Received switch state update:", JSON.stringify(state));
+            console.log("Received switch state update:", JSON.stringify(state));
 
-                if (state.states && state.initialized) {
-                    Object.keys(state.states).forEach(groupName => {
-                        updateSwitchStates(
-                            groupName,
-                            state.states[groupName],
-                            state.initialized[groupName] ?? false
-                        );
-                    });
-                } else if (state.States) {
-                    Object.keys(state.States).forEach(groupName => {
-                        updateSwitchStates(
-                            groupName,
-                            state.States[groupName],
-                            state.Initialized?.[groupName] ?? false
-                        );
-                    });
-                }
-            } catch (err) {
-                console.error("Error processing switch state:", err);
+            if (state.states && state.initialized) {
+                Object.keys(state.states).forEach(groupName => {
+                    const group = groups.find(g => g.name === groupName);
+                    if (!group) return;
+
+                    // Обновляем состояние переключателей
+                    const switches = [];
+                    const switchState = state.states[groupName];
+                    for (let i = 0; i < group.switchCount; i++) {
+                        switches.push((switchState & (1 << i)) !== 0);
+                    }
+
+                    // Обновляем чекбоксы
+                    for (let i = 0; i < group.switchCount; i++) {
+                        const checkbox = document.getElementById(`${groupName}_switch${i}`);
+                        if (checkbox) {
+                            // Обновляем состояние только если не в режиме cooldown
+                            if (!checkbox.classList.contains('cooldown')) {
+                                checkbox.checked = switches[i];
+                            }
+                            // Разблокируем если группа инициализирована и статус NORMAL_WORK
+                            checkbox.disabled = !state.initialized[groupName] ||
+                                (group.status !== 0x40 && group.status !== undefined) ||
+                                checkbox.classList.contains('cooldown');
+                        }
+                    }
+
+                    // Обновляем бинарное отображение
+                    const binary = switches.map(s => s ? '1' : '0').join('');
+                    const registerAddress = group.modbusRegister.toString().padStart(2, '0');
+                    const binaryElement = document.getElementById(`${groupName.replace(" ", "")}Binary`);
+                    if (binaryElement) {
+                        binaryElement.textContent =
+                            `${groupName} регистр MB_RELAYS_${groupName.replace(" ", "").toUpperCase()}_ADDRESS (адрес ${registerAddress}) - ${binary.padStart(group.switchCount, '0')}`;
+                    }
+                });
             }
         });
 
+        connection.on("ReceiveModbusData", (data) => {
+            console.log("Received Modbus data:", JSON.stringify(data));
+
+            if (!data || !data.groupName) {
+                console.error("Invalid Modbus data received:", data);
+                return;
+            }
+
+            // Обновление статуса
+            if (data.status !== undefined) {
+                // Приведение groupName к формату HTML-идентификаторов (group1, group2)
+                const groupId = data.groupName === "Группа 1" ? "group1" : "group2";
+                updateGroupStatus(data.groupName, groupId, data.status);
+            }
+
+            // Обновление состояния реле
+            if (data.state !== undefined && data.state !== null) {
+                const group = groups.find(g => g.name === data.groupName);
+                if (group) {
+                    updateSwitchStates(data.groupName, data.state, true);
+                }
+            } else if (data.registers && data.registers.length > 0) {
+                const group = groups.find(g => g.name === data.groupName);
+                if (group) {
+                    updateSwitchStates(data.groupName, data.registers[0], true);
+                }
+            }
+        });
+
+        function updateGroupStatus(groupName, groupId, statusCode) {
+            const statusElement = document.getElementById(`${groupId}Status`);
+            if (!statusElement) {
+                console.error(`Status element for ${groupName} (id: ${groupId}Status) not found`);
+                return;
+            }
+
+            const statusInfo = statusDescriptions[statusCode] ||
+                { text: `Неизвестный статус (0x${statusCode.toString(16)})`, class: "status-error" };
+
+            console.log(`Updating status for ${groupName}: ${statusInfo.text} (0x${statusCode.toString(16)})`);
+            statusElement.textContent = `Статус: ${statusInfo.text}`;
+            statusElement.className = `group-status ${statusInfo.class}`;
+
+            // Обновляем состояние группы и переключателей
+            const group = groups.find(g => g.name === groupName);
+            if (group) {
+                group.status = statusCode;
+                updateSwitchesState(groupName);
+            }
+        };
+
+        function updateSwitchesState(groupName) {
+            const group = groups.find(g => g.name === groupName);
+            if (!group) return;
+
+            const isEnabled = group.status === 0x40; // RELAYS_NORMAL_WORK
+
+            for (let i = 0; i < group.switchCount; i++) {
+                const checkbox = document.getElementById(`${group.name}_switch${i}`);
+                if (checkbox) {
+                    // Разблокируем только если статус 0x40 и нет cooldown
+                    checkbox.disabled = !isEnabled || checkbox.classList.contains('cooldown');
+                }
+            }
+        }
+
+        // Обновленная функция lockGroupSwitches
+        function lockGroupSwitches(groupName, lock) {
+            const group = groups.find(g => g.name === groupName);
+            if (!group) return;
+
+            for (let i = 0; i < group.switchCount; i++) {
+                const checkbox = document.getElementById(`${group.name}_switch${i}`);
+                if (checkbox) {
+                    if (lock) {
+                        checkbox.classList.add('cooldown');
+                        checkbox.disabled = true;
+                    } else {
+                        checkbox.classList.remove('cooldown');
+                        // Разблокируем только если статус 0x40
+                        checkbox.disabled = group.status !== 0x40;
+                    }
+                }
+            }
+        }
+
         connection.onclose(() => {
-            console.log("Connection lost - reconnecting...");
             setTimeout(() => connection.start(), 5000);
         });
 
@@ -317,7 +453,6 @@
                     .catch(err => console.error("Error requesting initial state:", err));
             })
             .catch(err => {
-                console.error("SignalR connection error:", err);
                 setTimeout(() => connection.start(), 5000);
             });
 

@@ -222,47 +222,66 @@
             return (high << 16) | low;
         }
 
-        function updateReadings(data) {
+        function updateReadings(registers) {
             const groupRegisterCount = 20;
             const socketRegisterCount = 20;
             const firstNumber = 60;
-            const baseGroupOffset = groupRegisterCount * groupIndex;
+            const baseGroupOffset = groupRegisterCount * group.modbusOffset;
             const totalRegisters = groupRegisterCount + group.switchCount * socketRegisterCount;
 
-            if (!Array.isArray(data) || data.length < totalRegisters) {
-                console.error("Invalid data format or not enough data");
+            if (!Array.isArray(registers) || registers.length < totalRegisters) {
+                console.error("Invalid data format or not enough data in registers:", registers);
                 return;
             }
 
             // Групповые параметры
-            document.getElementById("voltageRms").textContent = (combineRegisters(data[0 + baseGroupOffset], data[1 + baseGroupOffset]) / 1000).toFixed(3);
-            document.getElementById("voltageInst").textContent = (combineRegisters(data[10 + baseGroupOffset], data[11 + baseGroupOffset]) / 1000).toFixed(3);
-            document.getElementById("freqRms").textContent = (combineRegisters(data[8 + baseGroupOffset], data[9 + baseGroupOffset]) / 1000).toFixed(2);
-            document.getElementById("freqInst").textContent = (combineRegisters(data[18 + baseGroupOffset], data[19 + baseGroupOffset]) / 1000).toFixed(2);
+            document.getElementById("voltageRms").textContent = (combineRegisters(registers[0 + baseGroupOffset], registers[1 + baseGroupOffset]) / 1000).toFixed(3);
+            document.getElementById("voltageInst").textContent = (combineRegisters(registers[10 + baseGroupOffset], registers[11 + baseGroupOffset]) / 1000).toFixed(3);
+            document.getElementById("freqRms").textContent = (combineRegisters(registers[8 + baseGroupOffset], registers[9 + baseGroupOffset]) / 1000).toFixed(2);
+            document.getElementById("freqInst").textContent = (combineRegisters(registers[18 + baseGroupOffset], registers[19 + baseGroupOffset]) / 1000).toFixed(2);
 
             // Параметры розеток
             for (let i = 0; i < group.switchCount; i++) {
                 const baseSocketOffset = baseGroupOffset + firstNumber + (i * socketRegisterCount);
 
                 // RMS
-                document.getElementById(`socket${i}_voltageRms`).textContent = (combineRegisters(data[0 + baseSocketOffset], data[1 + baseSocketOffset]) / 1000).toFixed(3);
-                document.getElementById(`socket${i}_currentRms`).textContent = (combineRegisters(data[2 + baseSocketOffset], data[3 + baseSocketOffset]) / 1000).toFixed(3);
-                document.getElementById(`socket${i}_activePowerRms`).textContent = (combineRegisters(data[4 + baseSocketOffset], data[5 + baseSocketOffset]) / 1000).toFixed(3);
-                document.getElementById(`socket${i}_reactivePowerRms`).textContent = (combineRegisters(data[6 + baseSocketOffset], data[7 + baseSocketOffset]) / 1000).toFixed(3);
-                document.getElementById(`socket${i}_freqRms`).textContent = (combineRegisters(data[8 + baseSocketOffset], data[9 + baseSocketOffset]) / 1000).toFixed(2);
+                document.getElementById(`socket${i}_voltageRms`).textContent = (combineRegisters(registers[0 + baseSocketOffset], registers[1 + baseSocketOffset]) / 1000).toFixed(3);
+                document.getElementById(`socket${i}_currentRms`).textContent = (combineRegisters(registers[2 + baseSocketOffset], registers[3 + baseSocketOffset]) / 1000).toFixed(3);
+                document.getElementById(`socket${i}_activePowerRms`).textContent = (combineRegisters(registers[4 + baseSocketOffset], registers[5 + baseSocketOffset]) / 1000).toFixed(3);
+                document.getElementById(`socket${i}_reactivePowerRms`).textContent = (combineRegisters(registers[6 + baseSocketOffset], registers[7 + baseSocketOffset]) / 1000).toFixed(3);
+                document.getElementById(`socket${i}_freqRms`).textContent = (combineRegisters(registers[8 + baseSocketOffset], registers[9 + baseSocketOffset]) / 1000).toFixed(2);
 
                 // Мгновенные
-                document.getElementById(`socket${i}_voltageInst`).textContent = (combineRegisters(data[10 + baseSocketOffset], data[11 + baseSocketOffset]) / 1000).toFixed(3);
-                document.getElementById(`socket${i}_currentInst`).textContent = (combineRegisters(data[12 + baseSocketOffset], data[13 + baseSocketOffset]) / 1000).toFixed(3);
-                document.getElementById(`socket${i}_activePowerInst`).textContent = (combineRegisters(data[14 + baseSocketOffset], data[15 + baseSocketOffset]) / 1000).toFixed(3);
-                document.getElementById(`socket${i}_reactivePowerInst`).textContent = (combineRegisters(data[16 + baseSocketOffset], data[17 + baseSocketOffset]) / 1000).toFixed(3);
-                document.getElementById(`socket${i}_freqInst`).textContent = (combineRegisters(data[18 + baseSocketOffset], data[19 + baseSocketOffset]) / 1000).toFixed(2);
+                document.getElementById(`socket${i}_voltageInst`).textContent = (combineRegisters(registers[10 + baseSocketOffset], registers[11 + baseSocketOffset]) / 1000).toFixed(3);
+                document.getElementById(`socket${i}_currentInst`).textContent = (combineRegisters(registers[12 + baseSocketOffset], registers[13 + baseSocketOffset]) / 1000).toFixed(3);
+                document.getElementById(`socket${i}_activePowerInst`).textContent = (combineRegisters(registers[14 + baseSocketOffset], registers[15 + baseSocketOffset]) / 1000).toFixed(3);
+                document.getElementById(`socket${i}_reactivePowerInst`).textContent = (combineRegisters(registers[16 + baseSocketOffset], registers[17 + baseSocketOffset]) / 1000).toFixed(3);
+                document.getElementById(`socket${i}_freqInst`).textContent = (combineRegisters(registers[18 + baseSocketOffset], registers[19 + baseSocketOffset]) / 1000).toFixed(2);
             }
         }
 
         connection.on("ReceiveModbusData", (data) => {
             console.log("Received data:", data);
-            updateReadings(data);
+
+            // Проверяем, что данные валидны и относятся к текущей группе
+            if (!data || !data.groupName || data.groupName !== group.name) {
+                console.log(`Ignoring data for ${data?.groupName}, current group is ${group.name}`);
+                return;
+            }
+
+            // Проверяем наличие регистров и их тип
+            if (!data.registers || !Array.isArray(data.registers)) {
+                console.error("Invalid registers format in data:", data);
+                return;
+            }
+
+            // Обновляем показания в зависимости от типа данных
+            if (data.updateType === "all") {
+                updateReadings(data.registers);
+            } else if (data.updateType === "status_update") {
+                console.log(`Received status_update for ${group.name}, registers:`, data.registers);
+                // Здесь можно добавить обработку статуса реле, если нужно
+            }
         });
 
         connection.start()

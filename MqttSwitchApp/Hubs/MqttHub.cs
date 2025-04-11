@@ -16,8 +16,6 @@ public class MqttHub : Hub
         _modbusService = modbusService;
         _groups = groups;
         _hubContext = hubContext;
-
-        _modbusService.OnReadingsUpdated += BroadcastReadings;
     }
 
     public async Task UpdateSwitchState(SwitchStateDto state)
@@ -26,8 +24,8 @@ public class MqttHub : Hub
         {
             var response = new
             {
-                States = _groups.ToDictionary(g => g.Name, g => _switchState.GetState(g.Name)),
-                Initialized = _groups.ToDictionary(g => g.Name, g => _switchState.IsGroupInitialized(g.Name))
+                States = _groups.ToDictionary(g => g.Name, g => _modbusService.GetSwitchState(g.Name)),
+                Initialized = _groups.ToDictionary(g => g.Name, g => _modbusService.IsGroupInitialized(g.Name))
             };
 
             await Clients.All.SendAsync("ReceiveSwitchState", response);
@@ -47,8 +45,8 @@ public class MqttHub : Hub
     {
         try
         {
-            var states = _groups.ToDictionary(g => g.Name, g => _switchState.GetState(g.Name));
-            var initialized = _groups.ToDictionary(g => g.Name, g => _switchState.IsGroupInitialized(g.Name));
+            var states = _groups.ToDictionary(g => g.Name, g => _modbusService.GetSwitchState(g.Name));
+            var initialized = _groups.ToDictionary(g => g.Name, g => _modbusService.IsGroupInitialized(g.Name));
 
             return new
             {
@@ -66,31 +64,16 @@ public class MqttHub : Hub
     {
         var response = new
         {
-            States = _groups.ToDictionary(g => g.Name, g => _switchState.GetState(g.Name)),
-            Initialized = _groups.ToDictionary(g => g.Name, g => _switchState.IsGroupInitialized(g.Name))
+            States = _groups.ToDictionary(g => g.Name, g => _modbusService.GetSwitchState(g.Name)),
+            Initialized = _groups.ToDictionary(g => g.Name, g => _modbusService.IsGroupInitialized(g.Name))
         };
         await Clients.All.SendAsync("ReceiveSwitchState", response);
         await base.OnConnectedAsync();
     }
 
-    private async Task BroadcastReadings(string groupName, string type, ushort[] readings)
-    {
-        if (_disposed) return;
-
-        try
-        {
-            await _hubContext.Clients.All.SendAsync("ReceiveModbusData", readings);
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Error broadcasting readings: {ex.Message}");
-        }
-    }
-
     public override async Task OnDisconnectedAsync(Exception exception)
     {
         _disposed = true;
-        _modbusService.OnReadingsUpdated -= BroadcastReadings;
         await base.OnDisconnectedAsync(exception);
     }
 
@@ -99,7 +82,6 @@ public class MqttHub : Hub
         if (!_disposed)
         {
             _disposed = true;
-            _modbusService.OnReadingsUpdated -= BroadcastReadings;
         }
     }
 }
